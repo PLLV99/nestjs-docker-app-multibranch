@@ -1,0 +1,18 @@
+services:
+  app-dev:
+    # สร้าง image จาก Dockerfile แต่จะใช้แค่ 'builder' stage เป็นฐาน
+    # เพื่อให้มี devDependencies ครบสำหรับ development
+    build:
+      context: .
+      target: builder # <-- บอกให้ build ถึงแค่ stage 'builder'
+    container_name: nestjs-app-dev-instance
+    ports:
+      - "7002:3000" # Map port 7002 (host) -> 3000 (container)
+    volumes:
+      # Mount โฟลเดอร์ src เข้าไปเพื่อ live reload
+      - ./src:/app/src
+    environment:
+      - NODE_ENV=development
+      - PORT=3000
+    # รัน NestJS ในโหมด watch สำหรับ hot reload
+    command: npm run start:dev
