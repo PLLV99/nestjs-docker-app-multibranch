@@ -1,12 +1,12 @@
 // =================================================================
-// HELPER FUNCTION: สร้างฟังก์ชันสำหรับส่ง Notification ไปยัง n8n
-// การสร้างฟังก์ชันช่วยลดการเขียนโค้ดซ้ำซ้อน (DRY Principle)
+// HELPER FUNCTION: Create a function to send notifications to n8n
+// Using a helper function reduces duplicate code (DRY Principle)
 // =================================================================
 
 def sendNotificationToN8n(String status, String stageName, String imageTag, String containerName, String hostPort) {
-    // ใช้ Jenkins HTTP Request Plugin (ต้องติดตั้งก่อน)
-    // n8n-webhook คือ Jenkins Secret Text Credential ที่เก็บ URL ของ n8n webhook
-    // ต้องสร้าง Credential นี้ใน Jenkins ก่อนใช้งาน โดยใช้ ID ว่า n8n-webhook
+    // Uses the Jenkins HTTP Request Plugin (must be installed beforehand)
+    // n8n-webhook is a Jenkins Secret Text Credential that stores the n8n webhook URL
+    // You must create this Credential in Jenkins with the ID 'n8n-webhook' before using it
     script {
         withCredentials([string(credentialsId: 'n8n-webhook', variable: 'N8N_WEBHOOK_URL')]) {
             def payload = [
@@ -35,52 +35,53 @@ def sendNotificationToN8n(String status, String stageName, String imageTag, Stri
     }
 }
 
+
 pipeline {
-    // ใช้ agent any เพราะ build จะทำงานบน Jenkins controller (Linux container) อยู่แล้ว
+    // Use agent any because the build will already run on the Jenkins controller (Linux container)
     agent any
 
-    // กัน "เช็คเอาต์ซ้ำซ้อน"
-    // ถ้า job เป็นแบบ Pipeline from SCM / Multibranch แนะนำเพิ่ม options { skipDefaultCheckout(true) }
-    // เพื่อปิดการ checkout อัตโนมัติก่อนเข้า stages (เพราะเรามี checkout scm อยู่แล้ว)
-    options { 
-        skipDefaultCheckout(true)   // ถ้าเป็น Pipeline from SCM/Multi-branch
+    // Prevent duplicate checkouts
+    // If the job is Pipeline from SCM / Multibranch, it's recommended to add options { skipDefaultCheckout(true) }
+    // This disables the automatic checkout before stages (since we already have checkout scm below)
+    options {
+        skipDefaultCheckout(true)   // For Pipeline from SCM / Multibranch
     }
 
-    // กำหนด environment variables
+    // Define environment variables
     environment {
 
-        // กำหนดค่า Docker Hub credentials ID ที่ตั้งค่าไว้ใน Jenkins
+        // Docker Hub credentials ID configured in Jenkins
         DOCKER_HUB_CREDENTIALS_ID = 'dockerhub-cred'
         DOCKER_REPO               = "sakamotolv99/nestjs-docker-app"
 
-        // กำหนดค่าสำหรับจำลอง DEV environment บน Local
+        // Settings for simulating a DEV environment on local
         DEV_APP_NAME              = "nestjs-app-dev"
         DEV_HOST_PORT             = "7001"
 
-        // กำหนดค่าสำหรับจำลอง PROD environment บน Local
+        // Settings for simulating a PROD environment on local
         PROD_APP_NAME             = "nestjs-app-prod"
         PROD_HOST_PORT            = "7000"
     }
 
-    // กำหนด input parameters สำหรับเลือก Action (Build & Deploy หรือ Rollback)
-    // และกำหนดค่า ROLLBACK_TAG กับ ROLLBACK_TARGET เมื่อเลือก Rollback
+    // Define input parameters for selecting the action (Build & Deploy or Rollback)
+    // And define ROLLBACK_TAG and ROLLBACK_TARGET when choosing Rollback
     parameters {
-        choice(name: 'ACTION', choices: ['Build & Deploy', 'Rollback'], description: 'เลือก Action ที่ต้องการ')
-        string(name: 'ROLLBACK_TAG', defaultValue: '', description: 'สำหรับ Rollback: ใส่ Image Tag ที่ต้องการ (เช่น Git Hash หรือ dev-123)')
-        choice(name: 'ROLLBACK_TARGET', choices: ['dev', 'prod'], description: 'สำหรับ Rollback: เลือกว่าจะ Rollback ที่ Environment ไหน')
+        choice(name: 'ACTION', choices: ['Build & Deploy', 'Rollback'], description: 'Select the action you want to perform')
+        string(name: 'ROLLBACK_TAG', defaultValue: '', description: 'For Rollback: enter the image tag to use (e.g., Git hash or dev-123)')
+        choice(name: 'ROLLBACK_TARGET', choices: ['dev', 'prod'], description: 'For Rollback: choose which environment to rollback')
     }
 
-    // กำหนด stages ของ Pipeline
+    // Define Pipeline stages
     stages {
 
         // =================================================================
-        // BUILD STAGES: ทำงานเมื่อ ACTION คือ 'Build & Deploy'
+        // BUILD STAGES: Executed when ACTION is 'Build & Deploy'
         // =================================================================
 
-        // Stage 1: ดึงโค้ดล่าสุดจาก Git
-        // ใช้ checkout scm หากใช้ Pipeline from SCM
+        // Stage 1: Pull latest code from Git
+        // Uses checkout scm when using Pipeline from SCM
         stage('Checkout') {
-            // เงื่อนไข: เมื่อ ACTION คือ 'Build & Deploy' เท่านั้น
+            // Condition: only when ACTION is 'Build & Deploy'
             when { expression { params.ACTION == 'Build & Deploy' } }
             steps {
                 echo "Checking out code..."
@@ -88,15 +89,15 @@ pipeline {
             }
         }
 
-        // Stage 2: ติดตั้ง dependencies และ Run test
-        // ใช้ Node.js Docker image เพื่อความสม่ำเสมอ
-        // ถ้ามี package-lock.json ให้ใช้ npm ci แทน npm install จะเร็วและล็อกเวอร์ชันชัดเจนกว่า
-       stage('Install & Test') {
-            // เงื่อนไข: เมื่อ ACTION คือ 'Build & Deploy' เท่านั้น
+        // Stage 2: Install dependencies and run tests
+        // Uses a Node.js Docker image for consistency
+        // If package-lock.json exists, use npm ci instead of npm install for faster, reproducible installs
+        stage('Install & Test') {
+            // Condition: only when ACTION is 'Build & Deploy'
             when { expression { params.ACTION == 'Build & Deploy' } }
             steps {
                 echo "Running tests inside a consistent Docker environment..."
-                 script {
+                script {
                     docker.image('node:22-alpine').inside {
                         sh '''
                             if [ -f package-lock.json ]; then npm ci; else npm install; fi
@@ -107,23 +108,23 @@ pipeline {
             }
         }
 
-        // Stage 3: สร้าง Docker Image
-        // ใช้ Docker ที่ติดตั้งบน Jenkins agent (ต้องติดตั้ง Docker plugin ก่อน)
+        // Stage 3: Build Docker image
+        // Uses Docker installed on the Jenkins agent (Docker plugin required)
         stage('Build & Push Docker Image') {
             when { expression { params.ACTION == 'Build & Deploy' } }
             steps {
                 script {
                     def imageTag = (env.BRANCH_NAME == 'main') ? sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim() : "dev-${env.BUILD_NUMBER}"
                     env.IMAGE_TAG = imageTag
-                    
-                    // ใช้ docker.withRegistry() เพื่อความปลอดภัยและเรียบง่าย
+
+                    // Use docker.withRegistry() for secure and simple registry handling
                     docker.withRegistry('https://index.docker.io/v1/', DOCKER_HUB_CREDENTIALS_ID) {
                         echo "Building image: ${DOCKER_REPO}:${env.IMAGE_TAG}"
                         def customImage = docker.build("${DOCKER_REPO}:${env.IMAGE_TAG}", "--target production .")
-                        
+
                         echo "Pushing images to Docker Hub..."
                         customImage.push()
-                        // Push 'latest' tag เฉพาะเมื่อเป็น branch main
+                        // Push 'latest' tag only when on main branch
                         if (env.BRANCH_NAME == 'main') {
                             customImage.push('latest')
                         }
@@ -133,18 +134,18 @@ pipeline {
         }
 
         // =================================================================
-        // DEPLOY STAGES: ทำงานเมื่อ ACTION คือ 'Build & Deploy' ตามแต่ละ Branch
+        // DEPLOY STAGES: Executed when ACTION is 'Build & Deploy', per branch
         // =================================================================
 
-        // Stage 4: Deploy ไปยังเครื่อง local (Development)
-        // ดึง image ล่าสุดจาก Docker Hub มาใช้งาน
-        // หยุดและลบ container เก่าที่ชื่อ ${DEV_APP_NAME} (ถ้ามี)
-        // สร้างและรัน container ใหม่จาก image ล่าสุด
+        // Stage 4: Deploy to local machine (Development)
+        // Pull the latest image from Docker Hub
+        // Stop and remove any existing container named ${DEV_APP_NAME}
+        // Create and run a new container from the latest image
         stage('Deploy to DEV (Local Docker)') {
             when {
                 expression { params.ACTION == 'Build & Deploy' }
                 branch 'develop'
-            } 
+            }
             steps {
                 script {
                     def deployCmd = """
@@ -158,7 +159,7 @@ pipeline {
                     sh deployCmd
                 }
             }
-            // ส่งข้อมูลไปยัง n8n webhook เมื่อ deploy สำเร็จ
+            // Send data to n8n webhook when deploy to DEV succeeds
             post {
                 success {
                     sendNotificationToN8n('success', 'Deploy to DEV (Local Docker)', env.IMAGE_TAG, env.DEV_APP_NAME, env.DEV_HOST_PORT)
@@ -166,8 +167,8 @@ pipeline {
             }
         }
 
-        // Stage 5: รอการอนุมัติ (Approval) ก่อน Deploy ไปยัง Production
-        // เงื่อนไข: เมื่อ ACTION คือ 'Build & Deploy' และ branch คือ 'main'
+        // Stage 5: Wait for approval before deploying to Production
+        // Condition: ACTION is 'Build & Deploy' and branch is 'main'
         stage('Approval for Production') {
             when {
                 expression { params.ACTION == 'Build & Deploy' }
@@ -180,13 +181,13 @@ pipeline {
             }
         }
 
-        // Stage 6: Deploy ไปยังเครื่อง local (Production)
-        // ดึง image ล่าสุดจาก Docker Hub มาใช้งาน
+        // Stage 6: Deploy to local machine (Production)
+        // Pull the latest image from Docker Hub
         stage('Deploy to PRODUCTION (Local Docker)') {
             when {
                 expression { params.ACTION == 'Build & Deploy' }
                 branch 'main'
-            } 
+            }
             steps {
                 script {
                     def deployCmd = """
@@ -200,7 +201,7 @@ pipeline {
                     sh deployCmd
                 }
             }
-            // ส่งข้อมูลไปยัง n8n webhook เมื่อ deploy สำเร็จ
+            // Send data to n8n webhook when deploy to PROD succeeds
             post {
                 success {
                     sendNotificationToN8n('success', 'Deploy to PRODUCTION (Local Docker)', env.IMAGE_TAG, env.PROD_APP_NAME, env.PROD_HOST_PORT)
@@ -209,22 +210,22 @@ pipeline {
         }
 
         // =================================================================
-        // ROLLBACK STAGE: ทำงานเมื่อ ACTION คือ 'Rollback'
+        // ROLLBACK STAGE: Executed when ACTION is 'Rollback'
         // =================================================================
         stage('Execute Rollback') {
             when { expression { params.ACTION == 'Rollback' } }
             steps {
                 script {
                     if (params.ROLLBACK_TAG.trim().isEmpty()) {
-                        error "เมื่อเลือก Rollback กรุณาระบุ 'ROLLBACK_TAG'"
+                        error "When choosing Rollback, please specify 'ROLLBACK_TAG'"
                     }
 
-                    def targetAppName = (params.ROLLBACK_TARGET == 'dev') ? DEV_APP_NAME : PROD_APP_NAME
+                    def targetAppName  = (params.ROLLBACK_TARGET == 'dev') ? DEV_APP_NAME  : PROD_APP_NAME
                     def targetHostPort = (params.ROLLBACK_TARGET == 'dev') ? DEV_HOST_PORT : PROD_HOST_PORT
-                    def imageToDeploy = "${DOCKER_REPO}:${params.ROLLBACK_TAG.trim()}"
-                    
+                    def imageToDeploy  = "${DOCKER_REPO}:${params.ROLLBACK_TAG.trim()}"
+
                     echo "ROLLING BACK ${params.ROLLBACK_TARGET.toUpperCase()} to image: ${imageToDeploy}"
-                    
+
                     def deployCmd = """
                         docker pull ${imageToDeploy}
                         docker stop ${targetAppName} || true
@@ -237,7 +238,7 @@ pipeline {
             post {
                 success {
                     script {
-                        def targetAppName = (params.ROLLBACK_TARGET == 'dev') ? DEV_APP_NAME : PROD_APP_NAME
+                        def targetAppName  = (params.ROLLBACK_TARGET == 'dev') ? DEV_APP_NAME  : PROD_APP_NAME
                         def targetHostPort = (params.ROLLBACK_TARGET == 'dev') ? DEV_HOST_PORT : PROD_HOST_PORT
                         sendNotificationToN8n('success', "Rollback ${params.ROLLBACK_TARGET.toUpperCase()}", params.ROLLBACK_TAG, targetAppName, targetHostPort)
                     }
@@ -246,15 +247,15 @@ pipeline {
         }
     }
 
-    // กำหนด post actions
-    // เช่น การแจ้งเตือนเมื่อ pipeline เสร็จสิ้น
-   post {
+    // Define post actions
+    // For example, notifications when the pipeline finishes
+    post {
         always {
-            // ใช้ script block เพื่อให้สามารถใช้เงื่อนไข if ได้
+            // Use a script block so we can use if conditions
             script {
                 if (params.ACTION == 'Build & Deploy') {
                     echo "Cleaning up Docker images on agent..."
-                    // ใช้ try-catch เพื่อให้ pipeline ไม่ล้มเหลวหากลบ image ไม่สำเร็จ
+                    // Use try-catch so the pipeline does not fail if image removal fails
                     try {
                         sh """
                             docker image rm -f ${DOCKER_REPO}:${env.IMAGE_TAG} || true
@@ -264,13 +265,13 @@ pipeline {
                         echo "Could not clean up images, but continuing..."
                     }
                 }
-                // ส่วนของการลบ Workspace
+                // Workspace cleanup
                 echo "Cleaning up workspace..."
                 cleanWs()
             }
         }
         failure {
-            // ส่งข้อมูลไปยัง n8n webhook เมื่อ pipeline ล้มเหลว
+            // Send data to n8n webhook when the pipeline fails
             sendNotificationToN8n('failed', "Pipeline Failed", 'N/A', 'N/A', 'N/A')
         }
     }
