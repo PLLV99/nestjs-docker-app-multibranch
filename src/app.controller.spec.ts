@@ -15,7 +15,7 @@ describe('AppController', () => {
   });
 
   describe('root', () => {
-    it('should return "Hello World!"', () => {
+    it('should return "Hello from NestJS Docker App!"', () => {
       expect(appController.getHello()).toBe('Hello from NestJS Docker App!');
     });
   });
